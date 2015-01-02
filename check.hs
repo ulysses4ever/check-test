@@ -1,11 +1,14 @@
 import System.IO
 import System.Process
-import Control.Monad (filterM)
+import System.Environment (getArgs)
+import System.Directory (getDirectoryContents, getPermissions, searchable, canonicalizePath)
+import Control.Monad (filterM, (>=>))
 import Data.List
 import Data.Char
 import Data.Maybe
-import qualified Filesystem as FS
 import qualified Filesystem.Path.CurrentOS as FSP
+import System.FilePath ((</>))
+
 
 taskFilePrefix = "task-"
 taskFileSuffix = ".s"
@@ -14,25 +17,28 @@ taskFileNames = [taskFilePrefix ++ (show i) ++ taskFileSuffix |
 													i <- [1..taskCount]]
 
 main = do
-	sdirsRaw <- FS.listDirectory (FSP.decodeString ".")
-	studentDirs <- filterM FS.isDirectory sdirsRaw
-	ireps <- mapM reportStudentDir studentDirs
-	writeFile "report.txt" (concatIndividualReports ireps)
+	workingDir 			<- parseArgs
+	workingDirContents 	<- getAbsDirectoryContents workingDir
+	studentDirs 		<- filterM isDir workingDirContents
+	reports 			<- mapM reportStudentDir studentDirs
+	writeFile "report.txt" (concatIndividualReports reports)
+--	return ()
 
-reportStudentDir :: FSP.FilePath -> IO String
+reportStudentDir :: FilePath -> IO String
 reportStudentDir studentDir = do
-	studentDirContents <- FS.listDirectory studentDir
+	studentDirContents <- getDirectoryContents studentDir
 	let taskFiles = filter isLikeTaskFile studentDirContents
 	fileReports <- mapM reportFile taskFiles
-	return $ FSP.encodeString studentDir  ++ "\n" ++ 
+	return $ studentDir  ++ "\n" ++ 
 		if null taskFiles then "\tUnrecognized task files..."
 		else concatIndividualFileReports fileReports
 
+isLikeTaskFile :: FilePath -> Bool
 isLikeTaskFile file = let
-	fStr = FSP.encodeString $ FSP.filename file
-	in any (fStr `isSuffixOf`) taskFileNames	
+	fStr = FSP.encodeString $ FSP.filename $ FSP.decodeString file
+	in any (fStr `isSuffixOf`) taskFileNames
 
-reportFile :: FSP.FilePath -> IO String
+reportFile :: FilePath -> IO String
 reportFile file = do
 	let taskNum = getTaskNum file
 	let cmd = runCmd file
@@ -40,7 +46,7 @@ reportFile file = do
 		createProcess (shell cmd){ std_out = CreatePipe, std_err = CreatePipe }
 	results <- hGetContents hout
 	errors <- hGetContents herr
-	fContents <- readFile $ FSP.encodeString file
+	fContents <- readFile file
 	let maybeVar = getVar fContents
 	return $ case maybeVar of
 		Nothing     -> "No var"
@@ -49,9 +55,9 @@ reportFile file = do
 
 taskVarStamp t v = "task " ++ (t : " (var " ++ [v] ++ "): ")
 
-runCmd file = "cd " ++ (FSP.encodeString $ FSP.directory file) ++ 
-		" ;  as88 " ++ (FSP.encodeString $ FSP.filename file) ++ 
-		" && s88 "  ++ (FSP.encodeString $ FSP.filename file)
+runCmd file = "cd " ++ dir file ++ 
+		" ;  as88 " ++ filename file ++ 
+		" && s88 "  ++ filename file
 
 checkTask varNum taskNum taskFileText errors actualRes 
 	| elem "nerrors" (words errors) = 
@@ -72,9 +78,34 @@ illegalText varNum taskNum taskFileText =
 		Nothing  -> False
 		Just chk -> chk taskFileText
 
-getTaskNum = fromJust . find isDigit . FSP.encodeString . FSP.filename
+getTaskNum = fromJust . find isDigit . filename
 
 getVar = find (\c -> c == '1' || c == '2') . head . lines
+
+-- ******* Small helper functions
+composeM :: Monad m => (a -> m b) -> (b -> c) -> a -> m c
+composeM fM g = fM >=> (return . g)
+
+isDir :: FilePath -> IO Bool
+isDir = composeM getPermissions searchable
+
+parseArgs :: IO String
+parseArgs = do 
+    args <- getArgs
+    return $ case args of
+        []           -> "."
+        [workingDir] -> workingDir
+
+getAbsDirectoryContents :: FilePath -> IO [FilePath]
+getAbsDirectoryContents dir =
+	getDirectoryContents dir >>= 
+		mapM (canonicalizePath . (dir </>))
+
+filename :: FilePath -> String
+filename = FSP.encodeString . FSP.filename . FSP.decodeString
+
+dir :: FilePath -> String
+dir = FSP.encodeString . FSP.directory . FSP.decodeString
 
 concatIndividualFileReports :: [String] -> String
 concatIndividualFileReports = concat . intersperse "\n" . addTabs
@@ -84,6 +115,7 @@ concatIndividualReports = concat . intersperse "\n\n"
 
 addTabs = map ("\t" ++ )
 
+-- ******* Reference results
 res = [
 		(('1', '1'), "16"),
 		(('1', '2'), "9"),
@@ -95,7 +127,7 @@ res = [
 		(('2', '4'), "1")
 	]
 
--- ******* Text file with solutions checks *********
+-- ******* Extra checks for solutions *********
 hasWord word = (word `elem`) . words . (map toUpper)
 
 hasDiv = hasWord "DIV"
