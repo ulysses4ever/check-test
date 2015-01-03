@@ -24,7 +24,7 @@ runCmdFor file = "cd " ++ dir file ++
 			" ;  as88 " ++ filename file ++ 
 			" && s88 "  ++ filename file
 
--- ********** Main domain functions
+-- ********** Main domain types and functions
 
 type VariantId = Char
 type TaskId = Char
@@ -32,16 +32,16 @@ type TaskId = Char
 main = do
 	workingDir 			<- parseArgs
 	workingDirContents 	<- getAbsDirectoryContents workingDir
-	studentDirs 		<- filterM isDir workingDirContents
+	studentDirs 		<- filterM isDir $ sort workingDirContents
 	reports 			<- mapM reportStudentDir studentDirs
 	writeFile "report.txt" (concatIndividualReports reports)
 
 reportStudentDir :: FilePath -> IO String
 reportStudentDir studentDir = do
-	studentDirContents 	<- getDirectoryContents studentDir
-	let taskFiles 		=  filter isLikeTaskFile studentDirContents
+	studentDirContents 	<- getAbsDirectoryContents studentDir
+	let taskFiles 		=  filter isLikeTaskFile $ sort studentDirContents
 	fileReports 		<- mapM reportFile taskFiles
-	return $ studentDir  ++ "\n" ++ 
+	return $ filename studentDir  ++ "\n" ++ 
 		if null taskFiles then "\tUnrecognized task files..."
 		else concatIndividualFileReports fileReports
 
@@ -68,6 +68,12 @@ reportFile file = do
 getVarFrom :: FilePath -> IO (Maybe VariantId)
 getVarFrom file = readFile file >>= return . getVar
 
+getVar :: String -> Maybe Char
+getVar = find (\c -> c == '1' || c == '2') . head . lines
+
+taskNumFrom :: FilePath -> Char
+taskNumFrom = fromJust . find isDigit . filename
+
 checkTask :: VariantId -> TaskId -> String -> String -> String -> String
 checkTask varNum taskNum taskFileText errors actualRes 
 	| elem "nerrors" (words errors) = 
@@ -90,12 +96,6 @@ illegalText varNum taskNum taskFileText =
 		Nothing  -> False
 		Just chk -> chk taskFileText
 
-taskNumFrom :: FilePath -> Char
-taskNumFrom = fromJust . find isDigit . filename
-
-getVar :: String -> Maybe Char
-getVar = find (\c -> c == '1' || c == '2') . head . lines
-
 -- ******* Small helper functions
 
 taskVarStamp t v = "task " ++ (t : " (var " ++ [v] ++ "): ")
@@ -116,7 +116,7 @@ parseArgs = do
 getAbsDirectoryContents :: FilePath -> IO [FilePath]
 getAbsDirectoryContents dir =
 	getDirectoryContents dir >>= 
-		mapM (canonicalizePath . (dir </>))
+		mapM (canonicalizePath . (dir </>)) . filter (not .(`elem` [".", ".."])) 
 
 filename :: FilePath -> String
 filename = FSP.encodeString . FSP.filename . FSP.decodeString
