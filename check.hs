@@ -13,12 +13,21 @@ import Data.Maybe
 
 import qualified Filesystem.Path.CurrentOS as FSP -- cabal install system-filepath
 
+-- ********* Checker parameters
 
 taskFilePrefix = "task-"
 taskFileSuffix = ".s"
 taskCount = 4
 taskFileNames = [taskFilePrefix ++ (show i) ++ taskFileSuffix | 
 													i <- [1..taskCount]]
+runCmdFor file = "cd " ++ dir file ++ 
+			" ;  as88 " ++ filename file ++ 
+			" && s88 "  ++ filename file
+
+-- ********** Main domain functions
+
+type VariantId = Char
+type TaskId = Char
 
 main = do
 	workingDir 			<- parseArgs
@@ -26,43 +35,40 @@ main = do
 	studentDirs 		<- filterM isDir workingDirContents
 	reports 			<- mapM reportStudentDir studentDirs
 	writeFile "report.txt" (concatIndividualReports reports)
---	return ()
 
 reportStudentDir :: FilePath -> IO String
 reportStudentDir studentDir = do
-	studentDirContents <- getDirectoryContents studentDir
-	let taskFiles = filter isLikeTaskFile studentDirContents
-	fileReports <- mapM reportFile taskFiles
+	studentDirContents 	<- getDirectoryContents studentDir
+	let taskFiles 		=  filter isLikeTaskFile studentDirContents
+	fileReports 		<- mapM reportFile taskFiles
 	return $ studentDir  ++ "\n" ++ 
 		if null taskFiles then "\tUnrecognized task files..."
 		else concatIndividualFileReports fileReports
 
 isLikeTaskFile :: FilePath -> Bool
 isLikeTaskFile file = let
-	fStr = FSP.encodeString $ FSP.filename $ FSP.decodeString file
+		fStr = filename file
 	in any (fStr `isSuffixOf`) taskFileNames
 
 reportFile :: FilePath -> IO String
 reportFile file = do
-	let taskNum = getTaskNum file
-	let cmd = runCmd file
-	(_, Just hout, Just herr, _) <-
-		createProcess (shell cmd){ std_out = CreatePipe, std_err = CreatePipe }
-	results <- hGetContents hout
-	errors <- hGetContents herr
-	fContents <- readFile file
-	let maybeVar = getVar fContents
+	maybeVar 						<- getVarFrom file
+	let taskNum 					= taskNumFrom file
+	let cmd 						= runCmdFor file
+	(_, Just hout, Just herr, _) 	<-
+		createProcess (shell cmd) { std_out = CreatePipe, std_err = CreatePipe }
+	results 						<- hGetContents hout
+	errors 							<- hGetContents herr
+	fContents 						<- readFile file
 	return $ case maybeVar of
 		Nothing     -> "No var"
 		Just varNum -> taskVarStamp taskNum varNum ++
 			checkTask varNum taskNum fContents errors results
 
-taskVarStamp t v = "task " ++ (t : " (var " ++ [v] ++ "): ")
+getVarFrom :: FilePath -> IO (Maybe VariantId)
+getVarFrom file = readFile file >>= return . getVar
 
-runCmd file = "cd " ++ dir file ++ 
-		" ;  as88 " ++ filename file ++ 
-		" && s88 "  ++ filename file
-
+checkTask :: VariantId -> TaskId -> String -> String -> String -> String
 checkTask varNum taskNum taskFileText errors actualRes 
 	| elem "nerrors" (words errors) = 
 			"FAIL to assebmle\n" -- : unlines $ "FAIL":(addTabs $ lines actualRes)
@@ -73,20 +79,27 @@ checkTask varNum taskNum taskFileText errors actualRes
 	| otherwise = 
 			" FAIL, actual result: " ++ actualRes ++ "\n"
 
+checkResult :: VariantId -> TaskId -> String -> Bool
 checkResult varNum taskNum actualRes = 
 		(fromJust $ (varNum, taskNum) `lookup` res) `elem` 
 			words actualRes -- == ???
-		
+
+illegalText :: VariantId -> TaskId -> String -> Bool
 illegalText varNum taskNum taskFileText = 
 	case (varNum, taskNum) `lookup` addChecks of
 		Nothing  -> False
 		Just chk -> chk taskFileText
 
-getTaskNum = fromJust . find isDigit . filename
+taskNumFrom :: FilePath -> Char
+taskNumFrom = fromJust . find isDigit . filename
 
+getVar :: String -> Maybe Char
 getVar = find (\c -> c == '1' || c == '2') . head . lines
 
 -- ******* Small helper functions
+
+taskVarStamp t v = "task " ++ (t : " (var " ++ [v] ++ "): ")
+
 composeM :: Monad m => (a -> m b) -> (b -> c) -> a -> m c
 composeM fM g = fM >=> (return . g)
 
@@ -131,7 +144,7 @@ res = [
 		(('2', '4'), "1")
 	]
 
--- ******* Extra checks for solutions *********
+-- ******* Extra checks for solutions
 hasWord word = (word `elem`) . words . (map toUpper)
 
 hasDiv = hasWord "DIV"
@@ -143,3 +156,4 @@ addChecks = [
 		(('2', '2'), hasDiv),
 		(('2', '4'), hasRep)
 	]
+
