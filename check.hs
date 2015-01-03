@@ -1,13 +1,17 @@
+import System.Environment (getArgs)
+import System.FilePath ((</>))
+import System.Directory (getDirectoryContents, getPermissions, searchable, 
+							canonicalizePath)
 import System.IO
 import System.Process
-import System.Environment (getArgs)
-import System.Directory (getDirectoryContents, getPermissions, searchable, canonicalizePath)
+
 import Control.Monad (filterM, (>=>))
+
 import Data.List
 import Data.Char
 import Data.Maybe
-import qualified Filesystem.Path.CurrentOS as FSP
-import System.FilePath ((</>))
+
+import qualified Filesystem.Path.CurrentOS as FSP -- cabal install system-filepath
 
 
 taskFilePrefix = "task-"
