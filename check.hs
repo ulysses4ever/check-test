@@ -18,35 +18,48 @@ import qualified Filesystem.Path.CurrentOS as FSP -- cabal install system-filepa
 taskFilePrefix = "task-"
 taskFileSuffix = ".s"
 taskCount = 4
-taskFileNames = [taskFilePrefix ++ (show i) ++ taskFileSuffix | 
-                                                            i <- [1..taskCount]]
-runCmdFor file = "cd " ++ dir file ++ 
-            " ;  as88 " ++ filename file ++ 
-            " && s88 "  ++ filename file
+buildCmd = "as88"
+runCmd = "s88 " -- mind the trailing space
+buildFailText = "nerrors"
 
 -- ********** Main domain types
 
 type VariantId = Char
+
 type TaskId = Char
 
-newtype FileReport = FileReport (VariantId, TaskId, CheckResult)
+data FileReport = NoVar TaskId | FileReport VariantId TaskId CheckResult
 
-instance Show FileReport where
-    show (FileReport (varId, taskId, checkRes)) =
-        taskVarStamp taskId varId ++ show checkRes
-
-data CheckResult = NoVar | BuildFail | IllegalText | OK | FailWithResult String 
-    deriving Show
+data CheckResult = BuildFail | IllegalSource | OK | FailWithResult String 
 
 type StudentTag = String
 
-newtype StudentReport = StudentReport (StudentTag, [FileReport])
+data StudentReport = StudentReport StudentTag [FileReport]
+
+newtype WorkingDirReport = WorkingDirReport [StudentReport]
+
+--  *** Instances for domain types
+
+instance Show FileReport where
+    show (NoVar taskId) = "task " ++ [taskId] ++ ": No Variant"
+    show (FileReport varId taskId checkRes) =
+        taskVarStamp taskId varId ++ show checkRes
 
 instance Show StudentReport where
-    show (StudentReport (tag, rs))  = tag ++ "\n" ++
+    show (StudentReport tag rs)  = tag ++ "\n" ++
         case rs of
             [] -> "\tUnrecognized task files..."
-            _  -> concatFileReports rs
+            _  -> showFileReportList rs
+
+instance Show CheckResult where
+    show BuildFail     = "FAIL to build"
+    show IllegalSource = "FAIL to pass source text checks"
+    show OK            = "OK"
+    show (FailWithResult actualRes) = 
+                         "FAIL, actual result: " ++ actualRes
+
+instance Show WorkingDirReport where
+    show (WorkingDirReport studReports) = showStudentReportList studReports
 
 -- ********** Main domain functions
 
@@ -54,40 +67,66 @@ main = do
     workingDir             <- parseArgs
     workingDirContents     <- getAbsDirectoryContents workingDir
     studentDirs            <- filterM isDir $ sort workingDirContents
-    reports                <- mapM reportStudentDir studentDirs
-    writeFile "report.txt" (concatIndividualReports reports)
+    reports                <- mapM studentDirReport studentDirs
+    writeFile "report.txt" $ show $ WorkingDirReport reports
 
-reportStudentDir :: FilePath -> IO String
-reportStudentDir studentDir = do
+studentDirReport :: FilePath -> IO StudentReport
+studentDirReport studentDir = do
     studentDirContents        <- getAbsDirectoryContents studentDir
     let taskFiles             =  filter isLikeTaskFile $ sort studentDirContents
-    fileReports               <- mapM reportFile taskFiles
-    return $ filename studentDir  ++ "\n" ++ 
-        if null taskFiles then "\tUnrecognized task files..."
-        else concatIndividualFileReports fileReports
+    fileReports               <- mapM fileReport taskFiles
+    return                    $  StudentReport (filename studentDir) fileReports
+
+fileReport :: FilePath -> IO FileReport
+fileReport file = do
+    maybeVar                        <- getVarFrom file
+    let taskNum                     =  taskNumFrom file
+    let cmd                         =  runCmdFor file
+    (_, Just hout, Just herr, _)    <-
+        createProcess (shell cmd) { std_out = CreatePipe, std_err = CreatePipe }
+    results                         <- hGetContents hout
+    errors                          <- hGetContents herr
+    fContents                       <- readFile file
+    return                          $  case maybeVar of
+        Nothing     -> NoVar taskNum
+        Just varNum -> FileReport varNum taskNum $
+                            checkTask varNum taskNum fContents errors results
+
+checkTask :: VariantId -> TaskId -> String -> String -> String -> CheckResult
+checkTask varNum taskNum taskFileText errors actualRes 
+    | buildFailText `isInfixOf` errors          = BuildFail
+    | illegalSource varNum taskNum taskFileText = IllegalSource
+    | checkResult varNum taskNum actualRes      = OK
+    | otherwise                                 = FailWithResult actualRes
+
+checkResult :: VariantId -> TaskId -> String -> Bool
+checkResult varNum taskNum actualRes = 
+        (fromJust $ (varNum, taskNum) `lookup` res) `elem` -- == ???
+            words actualRes
+
+illegalSource :: VariantId -> TaskId -> String -> Bool
+illegalSource varNum taskNum taskFileText = 
+    case (varNum, taskNum) `lookup` addChecks of
+        Nothing  -> False
+        Just chk -> chk taskFileText
+
+-- ******* Small helper functions
+
+composeM :: Monad m => (a -> m b) -> (b -> c) -> a -> m c
+composeM fM g = fM >=> (return . g)
+
+taskFileNames :: [String]
+taskFileNames = [taskFilePrefix ++ (show i) ++ taskFileSuffix | 
+                                                            i <- [1..taskCount]]
 
 isLikeTaskFile :: FilePath -> Bool
 isLikeTaskFile file = let
         fStr = filename file
     in any (fStr `isSuffixOf`) taskFileNames
 
-reportFile :: FilePath -> IO String
-reportFile file = do
-    maybeVar                        <- getVarFrom file
-    let taskNum                     = taskNumFrom file
-    let cmd                         = runCmdFor file
-    (_, Just hout, Just herr, _)    <-
-        createProcess (shell cmd) { std_out = CreatePipe, std_err = CreatePipe }
-    results                         <- hGetContents hout
-    errors                          <- hGetContents herr
-    fContents                       <- readFile file
-    return $ case maybeVar of
-        Nothing     -> "No var"
-        Just varNum -> taskVarStamp taskNum varNum ++
-            checkTask varNum taskNum fContents errors results
-
-getVarFrom :: FilePath -> IO (Maybe VariantId)
-getVarFrom file = readFile file >>= return . getVar
+runCmdFor file = "cd " ++ dir file ++ 
+            " ;  " ++ buildCmd ++ " " ++ filename file ++ 
+            " && " ++ runCmd ++ filename file
 
 getVar :: String -> Maybe Char
 getVar = find (\c -> c == '1' || c == '2') . head . lines
@@ -95,44 +134,19 @@ getVar = find (\c -> c == '1' || c == '2') . head . lines
 taskNumFrom :: FilePath -> Char
 taskNumFrom = fromJust . find isDigit . filename
 
-checkTask :: VariantId -> TaskId -> String -> String -> String -> String
-checkTask varNum taskNum taskFileText errors actualRes 
-    | elem "nerrors" (words errors) = 
-            "FAIL to assebmle\n" -- : unlines $ "FAIL":(addTabs $ lines actualRes)
-    | illegalText varNum taskNum taskFileText =
-            " FAIL to pass text checks\n"
-    | checkResult varNum taskNum actualRes =
-            " OK\n"
-    | otherwise = 
-            " FAIL, actual result: " ++ actualRes ++ "\n"
-
-checkResult :: VariantId -> TaskId -> String -> Bool
-checkResult varNum taskNum actualRes = 
-        (fromJust $ (varNum, taskNum) `lookup` res) `elem` 
-            words actualRes -- == ???
-
-illegalText :: VariantId -> TaskId -> String -> Bool
-illegalText varNum taskNum taskFileText = 
-    case (varNum, taskNum) `lookup` addChecks of
-        Nothing  -> False
-        Just chk -> chk taskFileText
-
--- ******* Small helper functions
-
-taskVarStamp t v = "task " ++ (t : " (var " ++ [v] ++ "): ")
-
-composeM :: Monad m => (a -> m b) -> (b -> c) -> a -> m c
-composeM fM g = fM >=> (return . g)
-
-isDir :: FilePath -> IO Bool
-isDir = composeM getPermissions searchable
-
+-- *** File system and IO helper functions
 parseArgs :: IO String
 parseArgs = do 
     args <- getArgs
     return $ case args of
         []           -> "."
         [workingDir] -> workingDir
+
+isDir :: FilePath -> IO Bool
+isDir = composeM getPermissions searchable
+
+getVarFrom :: FilePath -> IO (Maybe VariantId)
+getVarFrom file = readFile file >>= return . getVar
 
 getAbsDirectoryContents :: FilePath -> IO [FilePath]
 getAbsDirectoryContents dir =
@@ -145,15 +159,16 @@ filename = FSP.encodeString . FSP.filename . FSP.decodeString
 dir :: FilePath -> String
 dir = FSP.encodeString . FSP.directory . FSP.decodeString
 
--- tobe REMOVED after complete translation to domain ADTs
-concatIndividualFileReports :: [String] -> String
-concatIndividualFileReports = concat . intersperse "\n" . addTabs
+-- *** Pretty-printing helper functions
+taskVarStamp t v = "task " ++ (t : " (var " ++ [v] ++ "): ")
 
-concatFileReports :: [FileReport] -> String
-concatFileReports = concat . intersperse "\n" . addTabs . map show
+intersperseWithTwoNl = concat . intersperse "\n\n"
 
-concatIndividualReports :: [String] -> String
-concatIndividualReports = concat . intersperse "\n\n"
+showFileReportList :: [FileReport] -> String
+showFileReportList = intersperseWithTwoNl . addTabs . map show
+
+showStudentReportList :: [StudentReport] -> String
+showStudentReportList = intersperseWithTwoNl . map show
 
 addTabs = map ("\t" ++ )
 
