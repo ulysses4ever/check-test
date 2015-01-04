@@ -24,10 +24,31 @@ runCmdFor file = "cd " ++ dir file ++
             " ;  as88 " ++ filename file ++ 
             " && s88 "  ++ filename file
 
--- ********** Main domain types and functions
+-- ********** Main domain types
 
 type VariantId = Char
 type TaskId = Char
+
+newtype FileReport = FileReport (VariantId, TaskId, CheckResult)
+
+instance Show FileReport where
+    show (FileReport (varId, taskId, checkRes)) =
+        taskVarStamp taskId varId ++ show checkRes
+
+data CheckResult = NoVar | BuildFail | IllegalText | OK | FailWithResult String 
+    deriving Show
+
+type StudentTag = String
+
+newtype StudentReport = StudentReport (StudentTag, [FileReport])
+
+instance Show StudentReport where
+    show (StudentReport (tag, rs))  = tag ++ "\n" ++
+        case rs of
+            [] -> "\tUnrecognized task files..."
+            _  -> concatFileReports rs
+
+-- ********** Main domain functions
 
 main = do
     workingDir             <- parseArgs
@@ -124,8 +145,12 @@ filename = FSP.encodeString . FSP.filename . FSP.decodeString
 dir :: FilePath -> String
 dir = FSP.encodeString . FSP.directory . FSP.decodeString
 
+-- tobe REMOVED after complete translation to domain ADTs
 concatIndividualFileReports :: [String] -> String
 concatIndividualFileReports = concat . intersperse "\n" . addTabs
+
+concatFileReports :: [FileReport] -> String
+concatFileReports = concat . intersperse "\n" . addTabs . map show
 
 concatIndividualReports :: [String] -> String
 concatIndividualReports = concat . intersperse "\n\n"
