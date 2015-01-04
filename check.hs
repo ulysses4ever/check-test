@@ -5,6 +5,7 @@ import System.Directory (getDirectoryContents, getPermissions, searchable,
 import System.IO
 import System.Process
 
+import Control.Applicative ((<$>))
 import Control.Monad (filterM, (>=>))
 
 import Data.List
@@ -21,6 +22,7 @@ taskCount = 4
 buildCmd = "as88"
 runCmd = "s88 " -- mind the trailing space
 buildFailText = "nerrors"
+testDataFilename = "testdata.txt"
 
 -- ********** Main domain types
 
@@ -80,29 +82,34 @@ studentDirReport studentDir = do
 fileReport :: FilePath -> IO FileReport
 fileReport file = do
     maybeVar                        <- getVarFrom file
-    let taskNum                     =  taskNumFrom file
+    let taskId                      =  taskNumFrom file
     let cmd                         =  runCmdFor file
     (_, Just hout, Just herr, _)    <-
         createProcess (shell cmd) { std_out = CreatePipe, std_err = CreatePipe }
     results                         <- hGetContents hout
     errors                          <- hGetContents herr
     fContents                       <- readFile file
-    return                          $  case maybeVar of
-        Nothing     -> NoVar taskNum
-        Just varNum -> FileReport varNum taskNum $
-                            checkTask varNum taskNum fContents errors results
+    maybe
+        (return $ NoVar taskId) 
+        (\varId -> FileReport varId taskId <$> 
+                    checkTask varId taskId fContents errors results)
+        maybeVar
 
-checkTask :: VariantId -> TaskId -> String -> String -> String -> CheckResult
-checkTask varNum taskNum taskFileText errors actualRes 
-    | buildFailText `isInfixOf` errors          = BuildFail
-    | illegalSource varNum taskNum taskFileText = IllegalSource
-    | checkResult varNum taskNum actualRes      = OK
-    | otherwise                                 = FailWithResult actualRes
+checkTask :: VariantId -> TaskId -> String -> String -> String -> IO CheckResult
+checkTask varId  taskId taskFileText errors actualRes 
+    | buildFailText `isInfixOf` errors        = return BuildFail
+    | illegalSource varId taskId taskFileText = return IllegalSource
+    | otherwise                               = 
+        checkTaskFallback varId taskId actualRes
 
-checkResult :: VariantId -> TaskId -> String -> Bool
-checkResult varNum taskNum actualRes = 
-        (fromJust $ (varNum, taskNum) `lookup` res) `elem` -- == ???
-            words actualRes
+-- works when build and source text OK
+checkTaskFallback :: VariantId -> TaskId -> String -> IO CheckResult
+checkTaskFallback varId taskId aRes =
+    ifThenElse OK (FailWithResult aRes) <$> checkResult varId taskId aRes
+
+checkResult :: VariantId -> TaskId -> String -> IO Bool
+checkResult varId taskId aRes =
+    (`elem` words aRes) . fromJust . (lookup (varId, taskId)) <$> loadTestData
 
 illegalSource :: VariantId -> TaskId -> String -> Bool
 illegalSource varNum taskNum taskFileText = 
@@ -114,6 +121,9 @@ illegalSource varNum taskNum taskFileText =
 
 composeM :: Monad m => (a -> m b) -> (b -> c) -> a -> m c
 composeM fM g = fM >=> (return . g)
+
+ifThenElse :: a -> a -> Bool -> a
+ifThenElse a1 a2 b = if b then a1 else a2
 
 taskFileNames :: [String]
 taskFileNames = [taskFilePrefix ++ (show i) ++ taskFileSuffix | 
@@ -133,6 +143,10 @@ getVar = find (\c -> c == '1' || c == '2') . head . lines
 
 taskNumFrom :: FilePath -> Char
 taskNumFrom = fromJust . find isDigit . filename
+
+-- Detect line to be thrown out from config files
+isServiceLine :: String -> Bool
+isServiceLine line = null line || "--" `isPrefixOf` line
 
 -- *** File system and IO helper functions
 parseArgs :: IO String
@@ -172,17 +186,16 @@ showStudentReportList = intersperseWithTwoNl . map show
 
 addTabs = map ("\t" ++ )
 
--- ******* Reference results
-res = [
-        (('1', '1'), "16"),
-        (('1', '2'), "9"),
-        (('1', '3'), "0"),
-        (('1', '4'), "1"),
-        (('2', '1'), "20"),
-        (('2', '2'), "3"),
-        (('2', '3'), "0"),
-        (('2', '4'), "1")
-    ]
+-- ******* Load reference results
+
+loadTestData :: IO [((VariantId, TaskId), String)]
+loadTestData = do
+    rawFileText <- readFile testDataFilename
+    let ls = filter (not . isServiceLine) $ lines rawFileText
+    let lws = map words ls
+    return $ zip
+        (map ((\[[v], [t]] -> (v, t)) . (take 2)) lws)
+        (map (concat . (drop 2)) lws)
 
 -- ******* Extra checks for solutions
 hasWord word = (word `elem`) . words . (map toUpper)

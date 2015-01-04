@@ -1,4 +1,6 @@
+*~
 sample-test
-sample-report.txt
+sample-report.txt*
 report.txt
-
+check*
+!check.hs

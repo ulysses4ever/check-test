@@ -1,0 +1,11 @@
+-- each line should be either a comment (starts with --), blank or
+--      of a format: "VAR TASK RESULT", VAR and TASK being digits
+1 1 16
+1 2 9
+1 3 0
+1 4 1
+2 1 20
+2 2 3
+2 3 0
+2 4 1
+
