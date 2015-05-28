@@ -134,8 +134,8 @@ isLikeTaskFile file = let
         fStr = filename file
     in any (fStr `isSuffixOf`) taskFileNames
 
-runCmdFor file = "cd " ++ dir file ++ 
-            " ;  " ++ buildCmd ++ " " ++ filename file ++ 
+runCmdFor file = "cd '" ++ dir file ++ 
+            "' ;  " ++ buildCmd ++ " " ++ filename file ++ 
             " && " ++ runCmd ++ filename file
 
 getVar :: String -> Maybe Char
@@ -204,9 +204,9 @@ hasDiv = hasWord "DIV"
 hasRep = hasWord "REP"
 
 addChecks = [
-        (('1', '1'), hasDiv),
-        (('1', '3'), hasRep),
-        (('2', '2'), hasDiv),
-        (('2', '4'), hasRep)
+--        (('1', '1'), hasDiv),
+--        (('1', '3'), hasRep),
+--        (('2', '2'), hasDiv),
+--        (('2', '4'), hasRep)
     ]
 
