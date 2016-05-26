@@ -47,7 +47,7 @@ checkTask varId  taskId taskFileText errors actualRes
 -- works when build and source text OK
 checkTaskFallback :: VariantId -> TaskId -> String -> IO CheckResult
 checkTaskFallback varId taskId aRes =
-    bool OK (FailWithResult aRes) <$> checkResult varId taskId aRes
+    bool (FailWithResult aRes) OK <$> checkResult varId taskId aRes
 
 checkResult :: VariantId -> TaskId -> String -> IO Bool
 checkResult varId taskId aRes =
