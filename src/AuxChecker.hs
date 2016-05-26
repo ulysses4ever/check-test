@@ -36,7 +36,7 @@ runCmdFor file = "cd '"   ++ dir file             ++ "' ;  "
               ++ buildCmd ++ " " ++ filename file 
               ++ " && timeout 2 " 
               ++ runCmd ++ filename file
-              ++ " || echo 'timeout'"
+              ++ " || echo ' exit code <> 0 or timeout'"
 
 getVar :: String -> Maybe Char
 getVar = find (\c -> c == '1' || c == '2') . head . lines
