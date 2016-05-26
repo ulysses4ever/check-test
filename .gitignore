@@ -5,3 +5,4 @@ report.txt
 .cabal-sandbox
 dist
 cabal.sandbox.config
+testsuite/sensitive
