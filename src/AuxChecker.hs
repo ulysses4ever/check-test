@@ -32,9 +32,11 @@ isLikeTaskFile file = let
         fStr = filename file
     in any (fStr `isSuffixOf`) taskFileNames
 
-runCmdFor file = "cd '" ++ dir file ++
-            "' ;  " ++ buildCmd ++ " " ++ filename file ++
-            " && " ++ runCmd ++ filename file
+runCmdFor file = "cd '"   ++ dir file             ++ "' ;  " 
+              ++ buildCmd ++ " " ++ filename file 
+              ++ " && timeout 2 " 
+              ++ runCmd ++ filename file
+              ++ " || echo 'timeout'"
 
 getVar :: String -> Maybe Char
 getVar = find (\c -> c == '1' || c == '2') . head . lines
